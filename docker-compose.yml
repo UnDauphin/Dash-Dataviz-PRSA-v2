@@ -1,0 +1,13 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  dash-app:
+    build: .
+    ports:
+      - "8050:8050"
+    volumes:
+      - ./data:/app/data  # Para montar datos externos si es necesario
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

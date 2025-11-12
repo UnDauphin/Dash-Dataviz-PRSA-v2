@@ -2,6 +2,7 @@
 import pandas as pd
 import numpy as np
 from scipy.stats import ks_2samp
+import os
 
 # Variables globales para los datasets
 df_original = None
@@ -9,20 +10,53 @@ df_imputed = None
 analysis_cols = []
 
 def initialize_data(path="PRSA_Data_Dongsi_20130301-20170228.csv"):
-    """Inicializa y carga todos los datos"""
+    """Inicializa y carga todos los datos con mejor manejo de errores"""
     global df_original, df_imputed, analysis_cols
     try:
+        # Verificar si el archivo existe
+        if not os.path.exists(path):
+            # Buscar en diferentes ubicaciones posibles
+            possible_paths = [
+                path,
+                f"./{path}",
+                f"/app/{path}",
+                f"/app/data/{path}",
+                "./data/PRSA_Data_Dongsi_20130301-20170228.csv"
+            ]
+            
+            for possible_path in possible_paths:
+                if os.path.exists(possible_path):
+                    path = possible_path
+                    print(f"✅ Archivo encontrado en: {path}")
+                    break
+            else:
+                print(f"❌ No se pudo encontrar el archivo en ninguna ubicación:")
+                for possible_path in possible_paths:
+                    print(f"   - {possible_path}")
+                return
+        
+        print(f"📂 Cargando datos desde: {path}")
         df_original = load_data(path)
+        
+        if df_original.empty:
+            print("❌ El DataFrame cargado está vacío")
+            return
+            
+        print(f"✅ Datos cargados. Dimensiones: {df_original.shape}")
+        
         df_imputed = impute_dataframe(df_original)
         analysis_cols = get_analysis_columns(df_imputed)
-        print("✅ Datos cargados exitosamente")
-        print(f"📊 Dimensiones: {df_original.shape}")
+        
         print(f"🔢 Variables de análisis: {len(analysis_cols)}")
-    except FileNotFoundError:
+        print("🎯 Inicialización completada exitosamente")
+        
+    except FileNotFoundError as e:
         print(f"❌ Error: No se encontró el archivo {path}")
-        df_original = pd.DataFrame()
-        df_imputed = pd.DataFrame()
-        analysis_cols = []
+        print(f"💡 Asegúrate de que el archivo esté en la raíz del proyecto")
+    except Exception as e:
+        print(f"❌ Error inesperado durante la inicialización: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 def load_data(path):
     """Carga y prepara el dataset original"""

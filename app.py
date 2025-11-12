@@ -1,20 +1,32 @@
-# app.py - Archivo principal de Dash
+# app.py - VERSIÓN PARA DOCKER
 import dash
 from dash import dcc, html, Input, Output, callback
 import warnings
 warnings.filterwarnings('ignore')
 
-# Inicializar datos
+# -------------------------
+# INICIALIZAR DATOS PRIMERO
+# -------------------------
 from utils.data_loader import initialize_data
+print("🔄 Inicializando datos...")
 initialize_data()
+print("✅ Datos inicializados correctamente")
 
-# Importar utilidades y páginas
+# -------------------------
+# IMPORTAR PÁGINAS DESPUÉS de inicializar datos
+# -------------------------
 from pages import (
     summary, missing, univariate, bivariate, timeseries, conclusions
 )
 
 # Inicializar la app
-app = dash.Dash(__name__, suppress_callback_exceptions=True)
+app = dash.Dash(
+    __name__, 
+    suppress_callback_exceptions=True,
+    external_stylesheets=[
+        'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css'
+    ]
+)
 app.title = "EDA PRSA - Análisis de Calidad del Aire"
 
 # Layout principal con tema oscuro
@@ -125,5 +137,14 @@ bivariate.register_callbacks(app)
 timeseries.register_callbacks(app)
 conclusions.register_callbacks(app)
 
+# Servir para producción
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=8050)
+    import os
+    debug_mode = os.environ.get('DEBUG', 'False').lower() == 'true'
+    app.run(
+        debug=debug_mode, 
+        host='0.0.0.0', 
+        port=8050,
+        dev_tools_ui=debug_mode,
+        dev_tools_props_check=debug_mode
+    )
