@@ -97,37 +97,28 @@ def render_timeseries():
     ])
 
 def render_stationarity():
-    """Pestaña de estacionariedad"""
-    if 'datetime' not in df_imputed.columns or df_imputed.empty:
-        return html.Div([
-            html.H3("⚖️ Análisis de Estacionariedad", style={'color': '#ffffff'}),
-            html.P("❌ No hay datos temporales disponibles para análisis de estacionariedad.")
-        ])
-    
+    """Pestaña de estacionariedad - Versión visual liviana"""
     return html.Div([
-        html.H3("⚖️ Análisis de Estacionariedad", style={'color': '#ffffff'}),
-        html.P("Selecciona una variable para realizar tests de estacionariedad:"),
+        html.H3("📊 Análisis Visual de Estacionariedad", style={'color': '#ffffff'}),
+        html.P("🔍 Evaluación mediante gráficos y métricas simples", 
+               style={'color': '#94a3b8', 'fontSize': '14px'}),
         
         html.Div([
             html.Label("Variable:", style={'color': '#ffffff', 'marginRight': '10px'}),
             dcc.Dropdown(
                 id='stationarity-variable-selector',
                 options=[{'label': col, 'value': col} for col in analysis_cols],
-                value=analysis_cols[0] if analysis_cols else None,
+                value='PM2.5' if 'PM2.5' in analysis_cols else analysis_cols[0],
                 style={'width': '300px', 'color': '#000000'}
             )
         ], style={'marginBottom': '20px'}),
         
-        html.Button('Ejecutar Tests de Estacionariedad', 
-                   id='run-stationarity-tests',
-                   style={'backgroundColor': '#3b82f6', 
-                          'color': 'white', 
-                          'padding': '10px 20px',
-                          'border': 'none',
-                          'borderRadius': '5px',
-                          'cursor': 'pointer'}),
+        # Gráficos de análisis visual
+        dcc.Graph(id='rolling-stats-plot'),
+        dcc.Graph(id='seasonal-pattern-plot'),
         
-        html.Div(id='stationarity-results', style={'marginTop': '20px'})
+        # Métricas visuales
+        html.Div(id='visual-stationarity-metrics', style={'marginTop': '20px'})
     ])
 
 def render_autocorrelation():
@@ -283,112 +274,258 @@ def register_callbacks(app):
             return {}
     
     # Callback para tests de estacionariedad
+    # Callback para análisis visual de estacionariedad
     @app.callback(
-        Output('stationarity-results', 'children'),
-        [Input('run-stationarity-tests', 'n_clicks'),
-         Input('stationarity-variable-selector', 'value')]
+        [Output('rolling-stats-plot', 'figure'),
+        Output('seasonal-pattern-plot', 'figure'),
+        Output('visual-stationarity-metrics', 'children')],
+        Input('stationarity-variable-selector', 'value')
     )
-    def update_stationarity(n_clicks, selected_var):
-        if not n_clicks or not selected_var:
-            return html.Div("Haz clic en 'Ejecutar Tests' para analizar la estacionariedad.")
+    def update_visual_stationarity(selected_var):
+        if not selected_var:
+            return {}, {}, ""
         
         df_orig, df_imp, _ = get_data()
         
         if df_imp.empty or selected_var not in df_imp.columns:
-            return html.Div("❌ Variable no disponible.")
+            return {}, {}, ""
         
         data = df_imp[selected_var].dropna()
         
-        if len(data) < 2:
-            return html.Div("❌ Datos insuficientes para el análisis.")
+        if len(data) < 100:
+            empty_fig = go.Figure()
+            empty_fig.update_layout(
+                title="Datos insuficientes para análisis",
+                template='plotly_dark',
+                height=300
+            )
+            return empty_fig, empty_fig, "❌ Datos insuficientes para análisis"
         
         try:
-            # Test ADF
-            adf_result = adfuller(data)
-            adf_statistic = adf_result[0]
-            adf_pvalue = adf_result[1]
-            adf_critical_values = adf_result[4]
+            # Sample para hacerlo más liviano (máximo 5000 puntos)
+            if len(data) > 5000:
+                data = data.sample(5000, random_state=42)
             
-            # Test KPSS
-            kpss_result = kpss(data, regression='c')
-            kpss_statistic = kpss_result[0]
-            kpss_pvalue = kpss_result[1]
-            kpss_critical_values = kpss_result[3]
+            # --- GRÁFICO 1: Estadísticas Móviles ---
+            fig_rolling = go.Figure()
             
-            # Interpretación
-            is_stationary_adf = adf_pvalue < 0.05
-            is_stationary_kpss = kpss_pvalue > 0.05
+            # Calcular ventana adaptativa
+            window_size = min(168, len(data)//10)  # Máximo 1 semana, mínimo 10% de datos
             
-            conclusion = ""
-            if is_stationary_adf and is_stationary_kpss:
-                conclusion = "✅ La serie es ESTACIONARIA"
-                color = "#10b981"
-            elif not is_stationary_adf and not is_stationary_kpss:
-                conclusion = "❌ La serie es NO ESTACIONARIA"
-                color = "#ef4444"
+            # Media móvil
+            rolling_mean = data.rolling(window=window_size, center=True).mean()
+            # Desviación estándar móvil
+            rolling_std = data.rolling(window=window_size, center=True).std()
+            
+            # Serie original (muestreada para mejor visualización)
+            if len(data) > 1000:
+                display_data = data.iloc[::len(data)//1000]
             else:
-                conclusion = "⚠️  Resultados contradictorios - se requiere análisis adicional"
-                color = "#f59e0b"
+                display_data = data
             
-            return html.Div([
-                html.H4(f"Resultados para {selected_var}", style={'color': '#ffffff'}),
+            fig_rolling.add_trace(go.Scatter(
+                x=display_data.index,
+                y=display_data,
+                mode='lines',
+                name='Serie Original',
+                line=dict(color='#3b82f6', width=1),
+                opacity=0.7
+            ))
+            
+            fig_rolling.add_trace(go.Scatter(
+                x=rolling_mean.index,
+                y=rolling_mean,
+                mode='lines',
+                name=f'Media Móvil ({window_size} puntos)',
+                line=dict(color='#ef4444', width=3)
+            ))
+            
+            # Banda de desviación estándar
+            fig_rolling.add_trace(go.Scatter(
+                x=rolling_mean.index,
+                y=rolling_mean + rolling_std,
+                mode='lines',
+                line=dict(width=0),
+                showlegend=False
+            ))
+            
+            fig_rolling.add_trace(go.Scatter(
+                x=rolling_mean.index,
+                y=rolling_mean - rolling_std,
+                mode='lines',
+                fill='tonexty',
+                name='Desviación Estándar',
+                line=dict(width=0),
+                fillcolor='rgba(239, 68, 68, 0.2)'
+            ))
+            
+            fig_rolling.update_layout(
+                title=f'📈 Estadísticas Móviles - {selected_var}',
+                xaxis_title='Tiempo',
+                yaxis_title='Valor',
+                template='plotly_dark',
+                height=400,
+                showlegend=True
+            )
+            
+            # --- GRÁFICO 2: Patrones Estacionales ---
+            fig_seasonal = go.Figure()
+            
+            # Extraer componentes temporales si existe datetime
+            if 'datetime' in df_imp.columns:
+                try:
+                    # Agrupar por hora del día para ver patrón diario
+                    df_temp = df_imp.copy()
+                    df_temp['hour'] = pd.to_datetime(df_temp['datetime']).dt.hour
+                    hourly_pattern = df_temp.groupby('hour')[selected_var].mean()
+                    
+                    fig_seasonal.add_trace(go.Scatter(
+                        x=hourly_pattern.index,
+                        y=hourly_pattern.values,
+                        mode='lines+markers',
+                        name='Patrón Horario',
+                        line=dict(color='#10b981', width=3),
+                        marker=dict(size=6)
+                    ))
+                    
+                    # Agrupar por mes para ver patrón anual
+                    df_temp['month'] = pd.to_datetime(df_temp['datetime']).dt.month
+                    monthly_pattern = df_temp.groupby('month')[selected_var].mean()
+                    
+                    fig_seasonal.add_trace(go.Scatter(
+                        x=monthly_pattern.index,
+                        y=monthly_pattern.values,
+                        mode='lines+markers',
+                        name='Patrón Mensual',
+                        line=dict(color='#f59e0b', width=3),
+                        marker=dict(size=6)
+                    ))
+                    
+                    fig_seasonal.update_layout(
+                        title=f'🔄 Patrones Estacionales - {selected_var}',
+                        xaxis_title='Período',
+                        yaxis_title='Valor Promedio',
+                        template='plotly_dark',
+                        height=400
+                    )
+                    
+                except Exception as e:
+                    # Fallback: gráfico de distribución
+                    fig_seasonal = px.histogram(
+                        data, x=data, 
+                        title=f'Distribución de {selected_var}',
+                        template='plotly_dark'
+                    )
+                    fig_seasonal.update_layout(height=400)
+            else:
+                # Sin datos temporales, mostrar distribución
+                fig_seasonal = px.histogram(
+                    data, x=data, 
+                    title=f'Distribución de {selected_var}',
+                    template='plotly_dark'
+                )
+                fig_seasonal.update_layout(height=400)
+            
+            # --- MÉTRICAS VISUALES ---
+            # Calcular métricas simples
+            overall_mean = data.mean()
+            overall_std = data.std()
+            
+            # Dividir datos en primeros y últimos 25% para comparar
+            split_point = len(data) // 4
+            first_quarter_mean = data.iloc[:split_point].mean()
+            last_quarter_mean = data.iloc[-split_point:].mean()
+            mean_change_pct = ((last_quarter_mean - first_quarter_mean) / first_quarter_mean) * 100
+            
+            # Volatilidad relativa
+            volatility_ratio = overall_std / overall_mean if overall_mean != 0 else 0
+            
+            # Evaluación visual de estacionariedad
+            if abs(mean_change_pct) < 10 and volatility_ratio < 1:
+                stationarity_assessment = "✅ APARENTEMENTE ESTACIONARIA"
+                assessment_color = "#10b981"
+            elif abs(mean_change_pct) < 25:
+                stationarity_assessment = "⚠️  POSIBLEMENTE ESTACIONARIA"
+                assessment_color = "#f59e0b"
+            else:
+                stationarity_assessment = "❌ PROBABLEMENTE NO ESTACIONARIA"
+                assessment_color = "#ef4444"
+            
+            metrics_content = html.Div([
+                html.H4("📊 Evaluación Visual de Estacionariedad", style={'color': '#ffffff'}),
                 
                 html.Div([
-                    html.H5("Test de Dickey-Fuller Aumentado (ADF)", style={'color': '#3b82f6'}),
-                    html.P(f"Estadístico: {adf_statistic:.4f}"),
-                    html.P(f"Valor p: {adf_pvalue:.4f}"),
-                    html.P("Hipótesis nula: La serie tiene raíz unitaria (no estacionaria)"),
-                    html.P(f"Conclusión: {'RECHAZAR H0 - Serie estacionaria' if is_stationary_adf else 'NO RECHAZAR H0 - Serie no estacionaria'}"),
+                    # Columna 1: Métricas básicas
+                    html.Div([
+                        html.H5("📈 Métricas Básicas", style={'color': '#3b82f6'}),
+                        html.P(f"Media global: {overall_mean:.2f}"),
+                        html.P(f"Desviación estándar: {overall_std:.2f}"),
+                        html.P(f"Volatilidad relativa: {volatility_ratio:.2f}"),
+                    ], style={
+                        'backgroundColor': '#1e293b',
+                        'padding': '15px',
+                        'borderRadius': '8px',
+                        'flex': 1,
+                        'margin': '5px'
+                    }),
                     
-                    html.H5("Valores Críticos ADF:", style={'marginTop': '15px'}),
+                    # Columna 2: Cambio temporal
+                    html.Div([
+                        html.H5("🕒 Cambio Temporal", style={'color': '#3b82f6'}),
+                        html.P(f"Media inicial: {first_quarter_mean:.2f}"),
+                        html.P(f"Media final: {last_quarter_mean:.2f}"),
+                        html.P(f"Cambio: {mean_change_pct:+.1f}%"),
+                    ], style={
+                        'backgroundColor': '#1e293b',
+                        'padding': '15px',
+                        'borderRadius': '8px',
+                        'flex': 1,
+                        'margin': '5px'
+                    }),
+                    
+                    # Columna 3: Evaluación
+                    html.Div([
+                        html.H5("🔍 Evaluación", style={'color': '#3b82f6'}),
+                        html.P(stationarity_assessment, 
+                            style={'color': assessment_color, 'fontWeight': 'bold', 'fontSize': '16px'}),
+                        html.P("Basado en análisis visual de tendencia y volatilidad", 
+                            style={'color': '#94a3b8', 'fontSize': '12px'}),
+                    ], style={
+                        'backgroundColor': '#1e293b',
+                        'padding': '15px',
+                        'borderRadius': '8px',
+                        'flex': 1,
+                        'margin': '5px'
+                    }),
+                ], style={'display': 'flex', 'gap': '10px', 'marginBottom': '15px'}),
+                
+                # Guía de interpretación
+                html.Div([
+                    html.H5("📖 Guía de Interpretación", style={'color': '#f59e0b'}),
                     html.Ul([
-                        html.Li(f"1%: {adf_critical_values['1%']:.4f}"),
-                        html.Li(f"5%: {adf_critical_values['5%']:.4f}"),
-                        html.Li(f"10%: {adf_critical_values['10%']:.4f}")
+                        html.Li("✅ Media móvil estable + Banda estrecha = Probable estacionariedad"),
+                        html.Li("⚠️  Media móvil con pendiente + Banda ancha = Posible no estacionariedad"),
+                        html.Li("❌ Cambio >25% en medias + Patrón claro = Probable no estacionariedad"),
+                        html.Li("🔄 Patrones horarios/mensuales = Estacionalidad presente")
                     ])
                 ], style={
                     'backgroundColor': '#1e293b',
                     'padding': '15px',
-                    'borderRadius': '8px',
-                    'marginBottom': '15px'
-                }),
-                
-                html.Div([
-                    html.H5("Test KPSS", style={'color': '#3b82f6'}),
-                    html.P(f"Estadístico: {kpss_statistic:.4f}"),
-                    html.P(f"Valor p: {kpss_pvalue:.4f}"),
-                    html.P("Hipótesis nula: La serie es estacionaria"),
-                    html.P(f"Conclusión: {'NO RECHAZAR H0 - Serie estacionaria' if is_stationary_kpss else 'RECHAZAR H0 - Serie no estacionaria'}"),
-                    
-                    html.H5("Valores Críticos KPSS:", style={'marginTop': '15px'}),
-                    html.Ul([
-                        html.Li(f"1%: {kpss_critical_values['1%']:.4f}"),
-                        html.Li(f"5%: {kpss_critical_values['5%']:.4f}"),
-                        html.Li(f"10%: {kpss_critical_values['10%']:.4f}")
-                    ])
-                ], style={
-                    'backgroundColor': '#1e293b',
-                    'padding': '15px',
-                    'borderRadius': '8px',
-                    'marginBottom': '15px'
-                }),
-                
-                html.Div([
-                    html.H4("Conclusión General", style={'color': color}),
-                    html.P(conclusion, style={'color': color, 'fontWeight': 'bold', 'fontSize': '18px'})
-                ], style={
-                    'backgroundColor': '#1e293b',
-                    'padding': '15px',
-                    'borderRadius': '8px',
-                    'textAlign': 'center'
+                    'borderRadius': '8px'
                 })
             ])
             
+            return fig_rolling, fig_seasonal, metrics_content
+            
         except Exception as e:
-            return html.Div([
-                html.H4("❌ Error en el análisis", style={'color': '#ef4444'}),
-                html.P(f"Error: {str(e)}")
-            ])
+            # Figuras de error
+            error_fig = go.Figure()
+            error_fig.update_layout(
+                title=f"Error en análisis: {str(e)}",
+                template='plotly_dark',
+                height=300
+            )
+            return error_fig, error_fig, html.Div(f"❌ Error: {str(e)}", style={'color': '#ef4444'})
     
     # Callback para autocorrelación
     @app.callback(
