@@ -30,8 +30,8 @@ layout = html.Div([
             selected_style={'backgroundColor': '#1e293b'}
         ),
         dcc.Tab(
-            label='📈 Preparación Modelado', 
-            value='tab-model-prep',
+            label='📊 Análisis de Volatilidad', 
+            value='tab-volatility',
             style={'padding': '10px', 'fontWeight': 'bold'},
             selected_style={'backgroundColor': '#1e293b'}
         ),
@@ -110,12 +110,67 @@ def render_seasonality():
         dcc.Graph(id='seasonality-plot')
     ])
 
-def render_model_prep():
-    """Pestaña de preparación para modelado (por implementar)"""
+def render_volatility_analysis():
+    """Pestaña de análisis de volatilidad"""
+    if 'datetime' not in df_imputed.columns or df_imputed.empty:
+        return html.Div([
+            html.H3("📊 Análisis de Volatilidad", style={'color': '#ffffff'}),
+            html.P("❌ No hay datos temporales disponibles.")
+        ])
+    
+    # Variables recomendadas para análisis de volatilidad
+    volatility_vars = [col for col in analysis_cols if any(x in col for x in ['pm', 'so2', 'no2', 'co', 'o3', 'wspm'])]
+    if not volatility_vars:
+        volatility_vars = analysis_cols[:3] if len(analysis_cols) >= 3 else analysis_cols
+    
     return html.Div([
-        html.H3("📈 Preparación para Modelado", style={'color': '#ffffff'}),
-        html.P("🔨 Esta funcionalidad está en desarrollo..."),
-        html.P("Próximamente: Diferenciación, transformaciones, split temporal")
+        html.H3("📊 Análisis de Volatilidad en Series Temporales", style={'color': '#ffffff'}),
+        html.P("Identifica periodos de alta variabilidad y eventos extremos en los datos."),
+        
+        html.Div([
+            html.Div([
+                html.Label("Variable para análisis:", style={'color': '#ffffff'}),
+                dcc.Dropdown(
+                    id='volatility-variable',
+                    options=[{'label': col, 'value': col} for col in analysis_cols],
+                    value=volatility_vars[0] if volatility_vars else None,
+                    style={'color': '#000000'}
+                ),
+            ], style={'flex': '1', 'marginRight': '15px'}),
+            
+            html.Div([
+                html.Label("Ventana para volatilidad (días):", style={'color': '#ffffff'}),
+                dcc.Slider(
+                    id='volatility-window',
+                    min=1,
+                    max=30,
+                    step=1,
+                    value=7,
+                    marks={1: '1d', 7: '7d', 14: '14d', 30: '30d'},
+                ),
+            ], style={'flex': '1', 'marginRight': '15px'}),
+            
+            html.Div([
+                html.Label("Umbral de outliers (σ):", style={'color': '#ffffff'}),
+                dcc.Slider(
+                    id='outlier-threshold',
+                    min=1,
+                    max=3,
+                    step=0.5,
+                    value=2,
+                    marks={1: '1σ', 2: '2σ', 3: '3σ'},
+                ),
+            ], style={'flex': '1'}),
+        ], style={'display': 'flex', 'marginBottom': '20px', 'alignItems': 'end'}),
+        
+        html.H4("📈 Serie Temporal con Volatilidad", style={'color': '#ffffff', 'marginTop': '30px'}),
+        dcc.Graph(id='volatility-plot'),
+        
+        html.H4("🎯 Detección de Eventos Extremos", style={'color': '#ffffff', 'marginTop': '30px'}),
+        dcc.Graph(id='outliers-plot'),
+        
+        html.H4("📊 Estadísticas de Volatilidad", style={'color': '#ffffff', 'marginTop': '30px'}),
+        html.Div(id='volatility-stats')
     ])
 
 def register_callbacks(app):
@@ -129,8 +184,8 @@ def register_callbacks(app):
             return render_decomposition()
         elif tab == 'tab-seasonality':
             return render_seasonality()
-        elif tab == 'tab-model-prep':
-            return render_model_prep()
+        elif tab == 'tab-volatility':
+            return render_volatility_analysis()
         return html.Div("Selecciona una sub-pestaña")
     
     # Callback para descomposición
@@ -273,3 +328,182 @@ def register_callbacks(app):
         )
         
         return fig
+    
+    # Callback para análisis de volatilidad
+    @app.callback(
+        [Output('volatility-plot', 'figure'),
+        Output('outliers-plot', 'figure'),
+        Output('volatility-stats', 'children')],
+        [Input('volatility-variable', 'value'),
+        Input('volatility-window', 'value'),
+        Input('outlier-threshold', 'value')]
+    )
+    def update_volatility_analysis(selected_var, window, threshold):
+        if not selected_var:
+            return {}, {}, ""
+        
+        df_orig, df_imp, _ = get_data()
+        
+        if df_imp.empty or selected_var not in df_imp.columns or 'datetime' not in df_imp.columns:
+            return {}, {}, html.Div("❌ Variable no disponible.")
+        
+        try:
+            # Preparar datos
+            df_temp = df_imp[['datetime', selected_var]].copy()
+            df_temp = df_temp.set_index('datetime').sort_index()
+            
+            # Resample diario para mejor visualización
+            df_daily = df_temp.resample('D').mean().reset_index()
+            
+            # Calcular volatilidad (desviación estándar rolling)
+            df_daily['volatility'] = df_daily[selected_var].rolling(window=window).std()
+            
+            # Calcular z-score para outliers
+            mean_val = df_daily[selected_var].mean()
+            std_val = df_daily[selected_var].std()
+            df_daily['z_score'] = (df_daily[selected_var] - mean_val) / std_val
+            
+            # Identificar outliers
+            df_daily['is_outlier'] = abs(df_daily['z_score']) > threshold
+            
+            # GRÁFICO 1: Serie con volatilidad
+            fig_volatility = go.Figure()
+            
+            # Serie principal
+            fig_volatility.add_trace(go.Scatter(
+                x=df_daily['datetime'],
+                y=df_daily[selected_var],
+                mode='lines',
+                name=selected_var,
+                line=dict(color='#3b82f6', width=1),
+                opacity=0.7
+            ))
+            
+            # Banda de volatilidad (mean ± std)
+            fig_volatility.add_trace(go.Scatter(
+                x=df_daily['datetime'],
+                y=df_daily[selected_var].mean() + df_daily['volatility'],
+                mode='lines',
+                name='Volatilidad +',
+                line=dict(color='#ef4444', width=1, dash='dash'),
+                opacity=0.5
+            ))
+            
+            fig_volatility.add_trace(go.Scatter(
+                x=df_daily['datetime'],
+                y=df_daily[selected_var].mean() - df_daily['volatility'],
+                mode='lines',
+                name='Volatilidad -',
+                line=dict(color='#ef4444', width=1, dash='dash'),
+                opacity=0.5,
+                fill='tonexty'
+            ))
+            
+            fig_volatility.update_layout(
+                title=f'Serie de {selected_var} con Volatilidad ({window} días)',
+                template='plotly_dark',
+                plot_bgcolor='#1e293b',
+                paper_bgcolor='#1e293b',
+                font_color='white',
+                height=400
+            )
+            
+            # GRÁFICO 2: Eventos extremos
+            fig_outliers = go.Figure()
+            
+            # Puntos normales
+            normal_data = df_daily[~df_daily['is_outlier']]
+            fig_outliers.add_trace(go.Scatter(
+                x=normal_data['datetime'],
+                y=normal_data[selected_var],
+                mode='markers',
+                name='Valores normales',
+                marker=dict(color='#3b82f6', size=4),
+                opacity=0.6
+            ))
+            
+            # Outliers
+            outlier_data = df_daily[df_daily['is_outlier']]
+            fig_outliers.add_trace(go.Scatter(
+                x=outlier_data['datetime'],
+                y=outlier_data[selected_var],
+                mode='markers',
+                name=f'Outliers (> {threshold}σ)',
+                marker=dict(color='#ef4444', size=8, line=dict(width=2, color='white')),
+                opacity=0.8
+            ))
+            
+            fig_outliers.update_layout(
+                title=f'Eventos Extremos en {selected_var}',
+                template='plotly_dark',
+                plot_bgcolor='#1e293b',
+                paper_bgcolor='#1e293b',
+                font_color='white',
+                height=400
+            )
+            
+            # ESTADÍSTICAS
+            outliers_count = df_daily['is_outlier'].sum()
+            total_count = len(df_daily)
+            outlier_percentage = (outliers_count / total_count) * 100
+            
+            max_volatility = df_daily['volatility'].max()
+            avg_volatility = df_daily['volatility'].mean()
+            
+            stats_content = html.Div([
+                html.Div([
+                    html.Div([
+                        html.H5("📈 Estadísticas de Volatilidad", style={'color': '#3b82f6'}),
+                        html.P(f"Volatilidad promedio: {avg_volatility:.2f}"),
+                        html.P(f"Volatilidad máxima: {max_volatility:.2f}"),
+                        html.P(f"Ventana de análisis: {window} días"),
+                    ], style={
+                        'backgroundColor': '#1e293b',
+                        'padding': '15px',
+                        'borderRadius': '8px',
+                        'flex': '1',
+                        'marginRight': '10px'
+                    }),
+                    
+                    html.Div([
+                        html.H5("🎯 Detección de Outliers", style={'color': '#ef4444'}),
+                        html.P(f"Outliers detectados: {outliers_count}"),
+                        html.P(f"Total de puntos: {total_count}"),
+                        html.P(f"Porcentaje de outliers: {outlier_percentage:.1f}%"),
+                        html.P(f"Umbral: {threshold} desviaciones estándar"),
+                    ], style={
+                        'backgroundColor': '#1e293b',
+                        'padding': '15px',
+                        'borderRadius': '8px',
+                        'flex': '1',
+                        'marginLeft': '10px'
+                    }),
+                ], style={'display': 'flex', 'marginBottom': '15px'}),
+                
+                # Periodos de alta volatilidad
+                html.Div([
+                    html.H5("🔄 Periodos de Alta Volatilidad", style={'color': '#f59e0b'}),
+                    html.P("Los periodos de alta volatilidad pueden indicar:"),
+                    html.Ul([
+                        html.Li("Cambios abruptos en condiciones meteorológicas"),
+                        html.Li("Eventos de contaminación extraordinarios"),
+                        html.Li("Problemas en la medición de datos"),
+                        html.Li("Transiciones estacionales")
+                    ])
+                ], style={
+                    'backgroundColor': '#1e293b',
+                    'padding': '15px',
+                    'borderRadius': '8px'
+                })
+            ])
+            
+            return fig_volatility, fig_outliers, stats_content
+            
+        except Exception as e:
+            error_fig = go.Figure()
+            error_fig.update_layout(
+                title=f"Error en análisis: {str(e)}",
+                template='plotly_dark',
+                height=400
+            )
+            return error_fig, error_fig, html.Div(f"❌ Error: {str(e)}")

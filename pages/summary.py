@@ -1,10 +1,27 @@
 # pages/summary.py
 from dash import dcc, html, dash_table
 import plotly.express as px
+import plotly.graph_objects as go
+import pandas as pd
 from utils.data_loader import get_data
 
 # Obtener datos
 df_original, df_imputed, analysis_cols = get_data()
+
+# Cargar datos de estaciones (asumiendo que el archivo está en la raíz del proyecto)
+try:
+    stations_df = pd.read_csv('stations_coordinates.csv')
+except:
+    # Datos de ejemplo en caso de que no encuentre el archivo
+    stations_df = pd.DataFrame({
+        'station': ['Dongsi', 'Nongzhanguan', 'Wanshouxigong', 'Aotizhongxin', 
+                   'Dingling', 'Changping', 'Gucheng', 'Huairou', 'Shunyi', 
+                   'Tiantan', 'Wanliu', 'Guanyuan'],
+        'lat': [39.929, 39.938, 39.878, 39.983, 40.292, 40.217, 39.914, 
+               40.413, 40.129, 39.886, 39.987, 39.929],
+        'lon': [116.417, 116.467, 116.367, 116.417, 116.217, 116.233, 
+               116.184, 116.634, 116.655, 116.407, 116.306, 116.357]
+    })
 
 # Diccionario de explicación de variables
 variable_descriptions = {
@@ -27,6 +44,53 @@ variable_descriptions = {
     'station': 'Estación de monitoreo - Dongsi en Beijing',
     'datetime': 'Fecha y hora completa de la medición'
 }
+
+# Crear mapa de estaciones
+def create_stations_map():
+    # Agregar columna para resaltar Dongsi
+    stations_df['current_station'] = stations_df['station'] == 'Dongsi Beijing'
+    stations_df['size'] = stations_df['current_station'].apply(lambda x: 20 if x else 10)
+    stations_df['color'] = stations_df['current_station'].apply(lambda x: '#ef4444' if x else '#3b82f6')
+    
+    fig = go.Figure()
+    
+    # Añadir todas las estaciones
+    for _, row in stations_df.iterrows():
+        fig.add_trace(go.Scattermapbox(
+            lat=[row['lat']],
+            lon=[row['lon']],
+            mode='markers+text',
+            marker=dict(
+                size=row['size'],
+                color=row['color'],
+                opacity=0.8
+            ),
+            text=[row['station']],
+            textposition="top right",
+            name=row['station'],
+            hovertemplate=(
+                f"<b>{row['station']}</b><br>" +
+                f"Lat: {row['lat']:.3f}<br>" +
+                f"Lon: {row['lon']:.3f}<br>" +
+                f"{'📍 Estación actual' if row['current_station'] else '📍 Otra estación'}" +
+                "<extra></extra>"
+            )
+        ))
+    
+    fig.update_layout(
+        mapbox=dict(
+            style='open-street-map',
+            center=dict(lat=39.9, lon=116.4),  # Centro en Beijing
+            zoom=10
+        ),
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=400,
+        showlegend=False,
+        paper_bgcolor='#1e293b',
+        plot_bgcolor='#1e293b'
+    )
+    
+    return fig
 
 # Layout de la pestaña de resumen
 layout = html.Div([
@@ -78,6 +142,36 @@ layout = html.Div([
     ], style={
         'backgroundColor': '#1e293b', 
         'padding': '20px', 
+        'borderRadius': '10px',
+        'marginBottom': '20px'
+    }),
+
+    # Mapa de estaciones
+    html.Div([
+        html.H3("🗺️ Red de Estaciones de Monitoreo - Beijing", style={'color': '#ffffff', 'marginBottom': '15px'}),
+        html.P("Ubicación de las 12 estaciones de monitoreo de calidad del aire en Beijing", 
+               style={'color': '#94a3b8', 'marginBottom': '15px'}),
+        
+        # Leyenda del mapa
+        html.Div([
+            html.Div([
+                html.Span("🔴", style={'fontSize': '20px', 'marginRight': '8px'}),
+                html.Span("Dongsi (Estación actual)", style={'color': '#ffffff'})
+            ], style={'display': 'flex', 'alignItems': 'center', 'marginRight': '20px'}),
+            html.Div([
+                html.Span("🔵", style={'fontSize': '20px', 'marginRight': '8px'}),
+                html.Span("Otras estaciones", style={'color': '#ffffff'})
+            ], style={'display': 'flex', 'alignItems': 'center'})
+        ], style={'display': 'flex', 'marginBottom': '15px'}),
+        
+        dcc.Graph(
+            id='stations-map',
+            figure=create_stations_map(),
+            config={'displayModeBar': True, 'scrollZoom': True}
+        ),
+    ], style={
+        'backgroundColor': '#1e293b', 
+        'padding': '25px', 
         'borderRadius': '10px',
         'marginBottom': '20px'
     }),
