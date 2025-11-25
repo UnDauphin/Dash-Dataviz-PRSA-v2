@@ -16,7 +16,7 @@ print("✅ Datos inicializados correctamente")
 # IMPORTAR PÁGINAS DESPUÉS de inicializar datos
 # -------------------------
 from pages import (
-    summary, missing, univariate, bivariate, timeseries, conclusions, sarima
+    summary, univariate, timeseries, conclusions, prophet, desarrollo, missing
 )
 
 # Inicializar la app
@@ -59,8 +59,8 @@ app.layout = html.Div([
                     selected_style={'backgroundColor': '#1e293b', 'border': '1px solid #475569'}
                 ),
                 dcc.Tab(
-                    label='❓ Valores Faltantes', 
-                    value='tab-missing',
+                    label='🛠️ Desarrollo',
+                    value='tab-desarrollo',
                     style={'padding': '10px', 'fontWeight': 'bold'},
                     selected_style={'backgroundColor': '#1e293b', 'border': '1px solid #475569'}
                 ),
@@ -71,20 +71,14 @@ app.layout = html.Div([
                     selected_style={'backgroundColor': '#1e293b', 'border': '1px solid #475569'}
                 ),
                 dcc.Tab(
-                    label='🔗 Análisis Bivariado', 
-                    value='tab-bivariate',
-                    style={'padding': '10px', 'fontWeight': 'bold'},
-                    selected_style={'backgroundColor': '#1e293b', 'border': '1px solid #475569'}
-                ),
-                dcc.Tab(
-                    label='🕒 Análisis Series Tiempo', 
+                    label= '🕒 Análisis Series Tiempo', 
                     value='tab-timeseries',
                     style={'padding': '10px', 'fontWeight': 'bold'},
                     selected_style={'backgroundColor': '#1e293b', 'border': '1px solid #475569'}
                 ),
                 dcc.Tab(
-                    label='🔮 Predicciones SARIMA', 
-                    value='tab-sarima',
+                    label='🔮 Predicciones Prophet', 
+                    value='tab-prophet',
                     style={'padding': '10px', 'fontWeight': 'bold'},
                     selected_style={'backgroundColor': '#1e293b', 'border': '1px solid #475569'}
                 ),
@@ -123,28 +117,26 @@ app.layout = html.Div([
 def render_content(tab):
     if tab == 'tab-summary':
         return summary.layout
-    elif tab == 'tab-missing':
-        return missing.layout
+    elif tab == 'tab-desarrollo':
+        return desarrollo.layout
     elif tab == 'tab-univariate':
         return univariate.layout
-    elif tab == 'tab-bivariate':
-        return bivariate.layout
     elif tab == 'tab-timeseries':
         return timeseries.layout
+    elif tab == 'tab-prophet':
+        return prophet.layout
     elif tab == 'tab-conclusions':
         return conclusions.layout
-    elif tab == 'tab-sarima':
-        return sarima.layout
     return html.Div("Selecciona una pestaña")
 
 # Registrar callbacks de cada página
 summary.register_callbacks(app)
 missing.register_callbacks(app)
 univariate.register_callbacks(app)
-bivariate.register_callbacks(app)
 timeseries.register_callbacks(app)
 conclusions.register_callbacks(app)
-sarima.register_callbacks(app)
+prophet.register_callbacks(app)
+desarrollo.register_callbacks(app)
 
 # Servir para producción
 if __name__ == '__main__':
