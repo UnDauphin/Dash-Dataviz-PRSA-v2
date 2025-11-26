@@ -1,9 +1,10 @@
 # pages/summary.py
-from dash import dcc, html, dash_table
+from dash import dcc, html, dash_table, Input, Output, callback
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 from utils.data_loader import get_data
+from utils.database import load_data_from_query
 
 # Obtener datos
 df_original, df_imputed, analysis_cols = get_data()
@@ -43,6 +44,126 @@ variable_descriptions = {
     'WSPM': 'Velocidad del viento (m/s) - influye en dispersión de contaminantes',
     'station': 'Estación de monitoreo - Dongsi en Beijing',
     'datetime': 'Fecha y hora completa de la medición'
+}
+
+QUERIES = {
+    'pm25_stats': {
+        'name': '🌫️ Estadísticas PM2.5',
+        'query': """
+        SELECT 
+            COUNT(*) as total_filas,
+            COUNT("PM2.5") as filas_con_pm25,
+            AVG("PM2.5") as pm25_promedio,
+            MIN("PM2.5") as pm25_minimo,
+            MAX("PM2.5") as pm25_maximo,
+            STDDEV("PM2.5") as pm25_desviacion,
+            SUM(CASE WHEN "PM2.5" IS NULL THEN 1 ELSE 0 END) as nulos,
+            100.0 * SUM(CASE WHEN "PM2.5" IS NULL THEN 1 ELSE 0 END) / COUNT(*) as porcentaje_nulos
+        FROM prsa_data_dongsi
+        """
+    },
+    'pollution_by_year': {
+        'name': '📅 Contaminación por Año',
+        'query': """
+        SELECT 
+            year as año,
+            COUNT(*) as total_mediciones,
+            COUNT("PM2.5") as mediciones_pm25,
+            AVG("PM2.5") as pm25_promedio,
+            AVG("PM10") as pm10_promedio,
+            AVG("SO2") as so2_promedio,
+            AVG("NO2") as no2_promedio
+        FROM prsa_data_dongsi
+        GROUP BY year
+        HAVING COUNT("PM2.5") > 0
+        ORDER BY year
+        """
+    },
+    'seasonal_analysis': {
+        'name': '🌤️ Análisis Estacional',
+        'query': """
+        SELECT 
+            month as mes,
+            COUNT(*) as total_mediciones,
+            AVG("PM2.5") as pm25_promedio,
+            AVG("PM10") as pm10_promedio,
+            AVG("TEMP") as temperatura_promedio,
+            AVG("RAIN") as lluvia_promedio
+        FROM prsa_data_dongsi
+        WHERE "PM2.5" IS NOT NULL AND "TEMP" IS NOT NULL
+        GROUP BY month
+        ORDER BY month
+        """
+    },
+    'daily_pattern': {
+        'name': '🕐 Patrón Diario por Hora',
+        'query': """
+        SELECT 
+            hour as hora,
+            COUNT(*) as mediciones,
+            AVG("PM2.5") as pm25_promedio,
+            AVG("PM10") as pm10_promedio,
+            AVG("TEMP") as temperatura_promedio
+        FROM prsa_data_dongsi
+        WHERE "PM2.5" IS NOT NULL AND "TEMP" IS NOT NULL
+        GROUP BY hour
+        ORDER BY hour
+        """
+    },
+    'wind_analysis': {
+        'name': '💨 Análisis por Dirección del Viento',
+        'query': """
+        SELECT 
+            wd as direccion_viento,
+            COUNT(*) as mediciones,
+            AVG("PM2.5") as pm25_promedio,
+            AVG("PM10") as pm10_promedio,
+            AVG("WSPM") as velocidad_viento_promedio
+        FROM prsa_data_dongsi
+        WHERE wd IS NOT NULL AND "PM2.5" IS NOT NULL
+        GROUP BY wd
+        HAVING COUNT(*) >= 10
+        ORDER BY pm25_promedio DESC
+        LIMIT 10
+        """
+    },
+    'top_polluted_days': {
+        'name': '⚠️ Días Más Contaminados',
+        'query': """
+        SELECT 
+            year, month, day,
+            COUNT(*) as mediciones_dia,
+            AVG("PM2.5") as pm25_promedio,
+            AVG("PM10") as pm10_promedio,
+            AVG("TEMP") as temperatura_promedio,
+            AVG("RAIN") as lluvia_promedio
+        FROM prsa_data_dongsi
+        WHERE "PM2.5" IS NOT NULL
+        GROUP BY year, month, day
+        HAVING COUNT(*) >= 18
+        ORDER BY pm25_promedio DESC
+        LIMIT 10
+        """
+    },
+    'meteorology_correlation': {
+        'name': '🔗 Correlaciones Meteorológicas',
+        'query': """
+        SELECT 
+            COUNT(*) as pares_completos,
+            CORR("PM2.5", "TEMP") as corr_pm25_temperatura,
+            CORR("PM2.5", "PRES") as corr_pm25_presion,
+            CORR("PM2.5", "DEWP") as corr_pm25_punto_rocio,
+            CORR("PM2.5", "RAIN") as corr_pm25_lluvia,
+            CORR("PM2.5", "WSPM") as corr_pm25_viento
+        FROM prsa_data_dongsi
+        WHERE "PM2.5" IS NOT NULL 
+          AND "TEMP" IS NOT NULL 
+          AND "PRES" IS NOT NULL
+          AND "DEWP" IS NOT NULL
+          AND "RAIN" IS NOT NULL
+          AND "WSPM" IS NOT NULL
+        """
+    },
 }
 
 # Crear mapa de estaciones
@@ -133,12 +254,14 @@ layout = html.Div([
             'margin': '0 10px'
         }),
     ], style={'display': 'flex', 'marginBottom': '30px', 'justifyContent': 'space-between'}),
-    
+
     # Información de la estación
     html.Div([
         html.H3("🏢 Información de la Estación", style={'color': '#ffffff'}),
-        html.P(f"Estación: {df_original['station'].iloc[0] if 'station' in df_original.columns else 'No disponible'}"),
-        html.P(f"Rango temporal: {df_original['datetime'].min().strftime('%Y-%m-%d') if 'datetime' in df_original.columns else 'N/A'} a {df_original['datetime'].max().strftime('%Y-%m-%d') if 'datetime' in df_original.columns else 'N/A'}"),
+        html.P(f"Estación: {df_original['station'].iloc[0] if 'station' in df_original.columns else 'No disponible'}", 
+               style={'color': '#e2e8f0'}),
+        html.P(f"Rango temporal: {df_original['datetime'].min().strftime('%Y-%m-%d') if 'datetime' in df_original.columns else 'N/A'} a {df_original['datetime'].max().strftime('%Y-%m-%d') if 'datetime' in df_original.columns else 'N/A'}", 
+               style={'color': '#e2e8f0'}),
     ], style={
         'backgroundColor': '#1e293b', 
         'padding': '20px', 
@@ -254,52 +377,101 @@ layout = html.Div([
             },
         )
     ], style={'marginBottom': '30px'}),
-    
-    # Gráfico de tendencias (si hay datos temporales)
-    html.Div(id='trends-section')
+
+    # Sección de consultas interactivas
+    html.Div([
+        html.H3("🔍 Consultas Interactivas de la Base de Datos", 
+                style={'color': '#ffffff', 'marginBottom': '15px'}),
+        html.P("Selecciona una consulta para explorar los datos:", 
+               style={'color': '#94a3b8', 'marginBottom': '15px'}),
+        
+        # Selector de consultas
+        html.Div([
+            dcc.Dropdown(
+                id='query-selector',
+                options=[{'label': query_info['name'], 'value': query_id} 
+                        for query_id, query_info in QUERIES.items()],
+                placeholder='Selecciona una consulta...',
+                style={'color': '#000000', 'marginBottom': '15px'}
+            ),
+        ]),
+        
+        # Resultados de la consulta
+        html.Div(id='query-results', style={'marginTop': '20px'})
+        
+    ], style={
+        'backgroundColor': '#1e293b', 
+        'padding': '25px', 
+        'borderRadius': '10px',
+        'marginBottom': '20px'
+    }),
 ])
 
-def register_callbacks(app):
-    from dash import Input, Output
-    from utils.data_loader import get_data
+# Callbacks para las consultas interactivas
+@callback(
+    Output('query-results', 'children'),
+    Input('query-selector', 'value')
+)
+def update_query_results(selected_query):
+    if not selected_query:
+        return html.Div("Selecciona una consulta para ver los resultados.", 
+                       style={'color': '#94a3b8', 'textAlign': 'center', 'padding': '20px'})
     
-    @app.callback(
-        Output('trends-section', 'children'),
-        Input('main-tabs', 'value')
-    )
-    def render_trends(tab):
-        if tab != 'tab-summary':
-            return ""
-            
-        df_original, _, analysis_cols = get_data()
+    try:
+        # Ejecutar la consulta
+        query_info = QUERIES[selected_query]
+        df = load_data_from_query(query_info['query'])
         
-        if 'datetime' not in df_original.columns or not analysis_cols:
-            return html.Div("No hay datos temporales disponibles para mostrar tendencias.")
+        if df.empty:
+            return html.Div("No se encontraron resultados para esta consulta.", 
+                           style={'color': '#ef4444', 'padding': '20px'})
         
-        # Filtrar solo contaminantes para el gráfico
-        pollutants = [col for col in analysis_cols if col in ['pm2_5', 'pm10', 'so2', 'no2', 'co', 'o3']]
-        if not pollutants:
-            return html.Div("No se detectaron contaminantes para mostrar tendencias.")
+        # Formatear números decimales
+        for col in df.columns:
+            if df[col].dtype in ['float64', 'float32']:
+                df[col] = df[col].round(2)
+
+        # Para porcentajes, formatear como string con %
+        percentage_cols = [col for col in df.columns if 'porcentaje' in col.lower() or 'percentage' in col.lower()]
+        for col in percentage_cols:
+            df[col] = df[col].apply(lambda x: f"{x}%" if pd.notnull(x) else x)
         
-        try:
-            # Resample mensual
-            dfm = df_original.set_index('datetime').resample('M')[pollutants].mean().reset_index()
-            
-            fig = px.line(dfm, x='datetime', y=pollutants, 
-                         title="📈 Tendencias Mensuales - Contaminantes Principales",
-                         labels={'value': 'Concentración', 'datetime': 'Fecha'},
-                         template='plotly_dark')
-            
-            fig.update_layout(
-                plot_bgcolor='#1e293b',
-                paper_bgcolor='#1e293b',
-                font_color='white',
-                height=400
+        # Crear tabla de resultados
+        return html.Div([
+            html.H4(f"📊 {query_info['name']}", 
+                   style={'color': '#ffffff', 'marginBottom': '15px'}),
+            dash_table.DataTable(
+                data=df.to_dict('records'),
+                columns=[{"name": col, "id": col} for col in df.columns],
+                page_size=10,
+                style_table={'overflowX': 'auto', 'borderRadius': '10px'},
+                style_cell={
+                    'backgroundColor': '#1e293b',
+                    'color': 'white',
+                    'textAlign': 'left',
+                    'padding': '10px',
+                    'border': '1px solid #334155'
+                },
+                style_header={
+                    'backgroundColor': '#334155',
+                    'color': 'white',
+                    'fontWeight': 'bold',
+                    'border': '1px solid #475569'
+                },
+                style_data={
+                    'whiteSpace': 'normal',
+                    'height': 'auto',
+                },
             )
-            
-            return html.Div([
-                html.H3("📈 Tendencias Temporales", style={'color': '#ffffff', 'marginBottom': '15px'}),
-                dcc.Graph(figure=fig)
-            ])
-        except Exception as e:
-            return html.Div(f"Error al generar gráfico de tendencias: {str(e)}")
+        ])
+        
+    except Exception as e:
+        return html.Div([
+            html.H4("❌ Error en la consulta", style={'color': '#ef4444'}),
+            html.P(f"Error: {str(e)}", style={'color': '#94a3b8'})
+        ], style={'padding': '20px'})
+
+def register_callbacks(app):
+    # Este callback ya está definido arriba con el decorator @callback
+    # Solo mantenemos la función para compatibilidad si es necesaria
+    pass

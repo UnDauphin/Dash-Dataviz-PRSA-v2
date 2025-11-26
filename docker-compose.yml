@@ -10,5 +10,4 @@ services:
       - ./data:/app/data  # Para montar datos externos si es necesario
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://dolphin:wVY2iozo2mojMJHo80TuCn1Ph3gK8YSe@dpg-d4j2nfa4d50c73fg5dkg-a.oregon-postgres.render.com/dashdb_a8hk
     restart: unless-stopped
