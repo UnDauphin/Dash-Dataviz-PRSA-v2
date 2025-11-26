@@ -2,6 +2,7 @@
 import pandas as pd
 import numpy as np
 from scipy.stats import ks_2samp
+from utils.database import load_table, load_data_from_query
 import os
 
 # Variables globales para los datasets
@@ -9,58 +10,40 @@ df_original = None
 df_imputed = None
 analysis_cols = []
 
-def initialize_data(path="PRSA_Data_Dongsi_20130301-20170228.csv"):
-    """Inicializa y carga todos los datos con mejor manejo de errores"""
+def initialize_data():
+    """Inicializa y carga todos los datos desde PostgreSQL"""
     global df_original, df_imputed, analysis_cols
     try:
-        # Verificar si el archivo existe
-        if not os.path.exists(path):
-            # Buscar en diferentes ubicaciones posibles
-            possible_paths = [
-                path,
-                f"./{path}",
-                f"/app/{path}",
-                f"/app/data/{path}",
-                "./data/PRSA_Data_Dongsi_20130301-20170228.csv"
-            ]
-            
-            for possible_path in possible_paths:
-                if os.path.exists(possible_path):
-                    path = possible_path
-                    print(f"✅ Archivo encontrado en: {path}")
-                    break
-            else:
-                print(f"❌ No se pudo encontrar el archivo en ninguna ubicación:")
-                for possible_path in possible_paths:
-                    print(f"   - {possible_path}")
-                return
+        print("📂 Cargando datos desde PostgreSQL...")
         
-        print(f"📂 Cargando datos desde: {path}")
-        df_original = load_data(path)
+        # Cargar los datos principales desde la tabla PRSA
+        df_original = load_data()
         
         if df_original.empty:
-            print("❌ El DataFrame cargado está vacío")
+            print("❌ No se pudieron cargar datos desde PostgreSQL")
             return
             
         print(f"✅ Datos cargados. Dimensiones: {df_original.shape}")
         
+        # Procesar los datos (el resto del código se mantiene igual)
         df_imputed = impute_dataframe(df_original)
         analysis_cols = get_analysis_columns(df_imputed)
         
         print(f"🔢 Variables de análisis: {len(analysis_cols)}")
         print("🎯 Inicialización completada exitosamente")
         
-    except FileNotFoundError as e:
-        print(f"❌ Error: No se encontró el archivo {path}")
-        print(f"💡 Asegúrate de que el archivo esté en la raíz del proyecto")
     except Exception as e:
-        print(f"❌ Error inesperado durante la inicialización: {str(e)}")
+        print(f"❌ Error durante la inicialización: {str(e)}")
         import traceback
         traceback.print_exc()
 
-def load_data(path):
-    """Carga y prepara el dataset original"""
-    df = pd.read_csv(path)
+def load_data():
+    """Cargar y preparar el dataset desde PostgreSQL"""
+    df = load_table('prsa_data_dongsi')
+    
+    if df.empty:
+        print("❌ No se pudieron cargar datos desde PostgreSQL")
+        return df
     
     # Normalizar nombres de columnas
     df.columns = df.columns.str.strip().str.lower().str.replace('.', '_', regex=False).str.replace(' ', '_', regex=False)

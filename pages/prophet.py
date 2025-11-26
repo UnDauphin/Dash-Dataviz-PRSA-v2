@@ -5,25 +5,23 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 import os
+from utils.database import load_table
 
+def load_from_postgres(table_name):
+    """Cargar datos desde PostgreSQL"""
+    try:
+        df = load_table(table_name)
+        if not df.empty:
+            print(f"✅ {table_name} cargada desde PostgreSQL: {df.shape}")
+        return df
+    except Exception as e:
+        print(f"❌ Error cargando {table_name}: {e}")
+        return None
 
-def load_csv_safe(path, parse_dates=None, index_col=None):
-    if os.path.exists(path):
-        try:
-            return pd.read_csv(path, parse_dates=parse_dates, index_col=index_col)
-        except Exception:
-            try:
-                # fallback: read without parsing
-                return pd.read_csv(path)
-            except Exception:
-                return None
-    return None
-
-
-# Cargar los CSVs que ahora generó el notebook (o el usuario)
-pred_df = load_csv_safe('pred.csv', index_col=0, parse_dates=True)
-df_cv = load_csv_safe('df_cv.csv')
-df_p = load_csv_safe('df_p.csv')
+# Cargar los DataFrames desde PostgreSQL
+pred_df = load_from_postgres('pred')
+df_cv = load_from_postgres('df_cv')
+df_p = load_from_postgres('df_p')
 
 from utils.data_loader import get_data
 df_original, df_imputed, analysis_cols = get_data()
